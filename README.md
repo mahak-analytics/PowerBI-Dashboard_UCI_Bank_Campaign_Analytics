@@ -37,6 +37,8 @@ A SQL, Python and Power BI project on a bank's phone marketing campaign for term
 ![Risk and Priority Queue](images/page2.png)
 ![Dial Cap and Lift Simulator](images/page3.png)
 
+- `Bank_Campaign_Analytics.pbix` – Complete interactive Power BI dashboard and data model.
+
 ## How to run
 1. Download the CSV from the UCI link.
 2. Create a PostgreSQL database.
