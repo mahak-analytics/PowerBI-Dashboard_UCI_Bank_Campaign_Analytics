@@ -1,0 +1,128 @@
+Columns used: fact_calls[contacts_this_call], fact_calls[subscribed], fact_calls[duration_sec]
+dim_client[age_band], dim_campaign[previous_outcome], dim_campaign[contact_direction]
+Parameter tables: 'Max Dial Cap', 'Queue Limit %'
+
+-- 1. BASE METRICS
+Contacts = COUNTROWS ( fact_calls )
+
+Conversions = SUM ( fact_calls[subscribed] )
+
+Conversion Rate = DIVIDE ( [Conversions], [Contacts] )
+
+Dials = SUM ( fact_calls[contacts_this_call] )
+
+Dials per Conversion = DIVIDE ( [Dials], [Conversions] )
+
+Baseline Rate = CALCULATE ( [Conversion Rate], REMOVEFILTERS () )
+
+Rate vs Baseline (pp) = ( [Conversion Rate] - [Baseline Rate] ) * 100
+
+Credit Risk % =
+DIVIDE (
+    CALCULATE ( [Contacts], dim_client[has_credit_def] IN { "unknown", "yes" } ),
+    [Contacts]
+)
+
+-- 2. WHAT-IF PARAMETER READERS
+Selected Dial Cap = SELECTEDVALUE ( 'Max Dial Cap'[Max Dial Cap], 3 )
+
+-- 3. DIAL CAP SIMULATOR (Matches SQL Query 6)
+Dials Under Cap =
+VAR cap = [Selected Dial Cap]
+RETURN
+    SUMX ( fact_calls, MIN ( fact_calls[contacts_this_call], cap ) )
+
+Excess Dials Saved = [Dials] - [Dials Under Cap]
+
+% Dials Saved = DIVIDE ( [Excess Dials Saved], [Dials] )
+
+Conversions Kept =
+VAR cap = [Selected Dial Cap]
+RETURN
+    CALCULATE ( [Conversions], fact_calls[contacts_this_call] <= cap )
+
+Est. Conversions Lost = [Conversions] - [Conversions Kept]
+
+-- 4. CAP CURVE (Matches SQL Query 6 across axis 'Max Dial Cap'[Max Dial Cap])
+% Dials Saved (curve) =
+VAR c = MAX ( 'Max Dial Cap'[Max Dial Cap] )
+RETURN
+    DIVIDE ( [Dials] - SUMX ( fact_calls, MIN ( fact_calls[contacts_this_call], c ) ), [Dials] )
+
+% Conversions Retained (curve) =
+VAR c = MAX ( 'Max Dial Cap'[Max Dial Cap] )
+RETURN
+    DIVIDE ( CALCULATE ( [Conversions], fact_calls[contacts_this_call] <= c ), [Conversions] )
+
+-- 5. PRIORITIZATION ENGINE (Matches SQL Query 5: k = 50, min contacts = 100, includes job)
+Smoothed Rate =
+DIVIDE ( [Conversions] + 50 * [Baseline Rate], [Contacts] + 50 )
+
+Priority Score =
+IF ( [Contacts] >= 100, [Smoothed Rate] )
+
+Segment Lift = DIVIDE ( [Conversion Rate], [Baseline Rate] )
+
+Priority Rank =
+IF (
+    NOT ISBLANK ( [Priority Score] ),
+    RANKX (
+        FILTER (
+            SUMMARIZE (
+                ALLSELECTED ( fact_calls ),
+                dim_client[job],
+                dim_client[age_band],
+                dim_campaign[previous_outcome],
+                dim_campaign[contact_direction]
+            ),
+            [Contacts] >= 100
+        ),
+        [Priority Score], , DESC, DENSE
+    )
+)
+
+Cum Contact Share % =
+VAR r = [Priority Rank]
+RETURN
+    IF (
+        NOT ISBLANK ( r ),
+        DIVIDE (
+            SUMX (
+                FILTER (
+                    SUMMARIZE (
+                        ALLSELECTED ( fact_calls ),
+                        dim_client[job],
+                        dim_client[age_band],
+                        dim_campaign[previous_outcome],
+                        dim_campaign[contact_direction]
+                    ),
+                    [Contacts] >= 100 && [Priority Rank] <= r
+                ),
+                [Contacts]
+            ),
+            CALCULATE ( [Contacts], ALLSELECTED ( fact_calls ) )
+        )
+    )
+
+
+Priority Tier =
+VAR s = [Priority Score]
+RETURN
+    SWITCH ( TRUE (), ISBLANK ( s ), BLANK (), s >= 0.25, "High", s >= 0.12, "Medium", "Low" )
+
+-- 6. GOVERNANCE & NARRATIVE
+Reconciliation Status =
+IF (
+    CALCULATE ( [Contacts], REMOVEFILTERS () ) = 41176
+        && CALCULATE ( [Conversions], REMOVEFILTERS () ) = 4639,
+    "Reconciled to SQL",
+    "Mismatch"
+)
+
+-- 7. RLS ROLE FILTER (Modeling > Manage roles > table dim_client)
+[assigned_region] =
+    LOOKUPVALUE (
+        security_agent_region[assigned_region],
+        security_agent_region[user_email], USERPRINCIPALNAME ()
+    )
+
