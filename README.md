@@ -1,56 +1,53 @@
-# retail-banking-analytics
-End-to-end SQL data pipeline and Metabase dashboard optimizing B2C term deposit conversions.
-# Retail Banking Analytics: Optimizing Campaign Conversions & Macroeconomic Impact
+# Bank Campaign Analytics
 
-## 📌 Executive Summary
-In high-volume B2C outbound sales, operational friction occurs when agent time is misallocated toward low-yield demographics, resulting in diminishing returns and wasted marketing budget. 
+A SQL, Python and Power BI project on a bank's phone marketing campaign for term deposits. It looks at which clients subscribe, how results change with the number of calls, and what happens if calls per client are capped.
 
-This project involves the end-to-end development of a SQL-based data pipeline and Business Intelligence dashboard to analyze a retail bank's direct marketing campaigns (41,188 records). By engineering dimensional models and executing cohort analyses, this project identifies exact points of funnel drop-off and provides data-driven recommendations to reallocate agent outreach, significantly increasing the Lead-to-Conversion Rate.
+## Data
+- Source: [UCI Bank Marketing dataset](https://archive.ics.uci.edu/dataset/222/bank+marketing), file `bank-additional-full.csv`. This is public data, not a real bank's internal records.
+- 41,188 raw rows. After removing 12 exact duplicates: 41,176 contacts, 4,639 subscriptions (11.27%).
+- The CSV is not stored in this repo. Download it from the link above.
 
-## 🛠️ Technology Stack
-* **Database Engine:** PostgreSQL 17
-* **Query Design:** Advanced SQL (CTEs, Window Functions, Conditional Aggregations, Table Joins)
-* **Data Visualization:** Metabase
-* **Architecture:** Fact/Dimension Table Simulation, ETL Data Cleaning
+## Questions
+1. Which client groups subscribe most often?
+2. How does the subscription rate change as calls increase?
+3. What would a cap on calls per client save, and what would it cost?
+4. Which client segments should be called first?
 
----
+## Tools Used
+- PostgreSQL 17
+- Python (`pandas`, `SQLAlchemy`)
+- Power BI (DAX, RLS)
 
-## 📊 Strategic Business Insights
+## Project Structure
 
-Through rigorous SQL exploration of the campaign data, three critical operational inefficiencies were identified:
+- `01_prep_and_load.py` – Cleans the raw CSV, calculates pre-call scores/deciles, and loads data into Postgres.
+- `02_star_schema_and_analysis.sql` – Sets up the star schema (`dim_client`, `dim_campaign`, `dim_calendar`, `dim_economic`, `fact_calls`) and RLS tables.
+- `03_campaign_targeting_queries.sql` – 7 SQL queries for validating client profiles, risk, priority queues, and dial cap metrics.
+- `04_Power_BI_DAX_Measures.txt` – DAX measures used for the Power BI dashboard, dial simulator, and row-level security rules.
 
-### 1. The Demographic Yield Gap
-* **Observation:** The `31-45` age bracket consumed the vast majority of agent resources (21,974 contact attempts) but yielded a poor conversion rate of **9.37%**. 
-* **Insight:** Conversely, the `60+` demographic required only 915 contact attempts but delivered a massive **45.46%** conversion rate.
-* **Recommendation:** Immediately cap cold-outreach volume to the 31-45 cohort and redirect marketing spend toward the highly liquid and receptive 60+ demographic.
+## Quick Insights
 
-### 2. The Contact Fatigue Threshold
-* **Observation:** By grouping campaign contacts into distinct buckets, the data reveals a steep drop-off in subscription probability after multiple contact attempts.
-* **Insight:** Dialing a prospect more than 3 times during a single campaign yields rapidly diminishing returns, burning valuable agent hours on dead leads.
-* **Recommendation:** Implement a hard cap of 3 outbound dials per prospect per campaign cycle.
+- Stopping at 3 dials saves ~28k calls (uses 77,692 of 105,735) while hanging onto 4,084 of the 4,639 total conversions (555 came on call #3).
+- Conversion starts at 5.58% on call 1, drops to 4.83% by call 6, and bottoms out around 4.35% past 10 attempts.
+- Students and retirees scored highest on the priority queue, with the under-25 and 65+ age groups showing the lowest overall credit risk.
+- The '25–34' age band accounts for the highest contact share (~32%), but credit risk peaks in the '55–64' age group.
 
-### 3. Occupational Sector Performance
-* **Observation:** Using dimensional modeling to group discrete jobs into macro-sectors (`Corporate`, `Labor`, `Out of Workforce`), the non-working sector (students, retired) showed disproportionately high engagement.
-* **Insight:** Traditional blue-collar and corporate outreach pipelines are highly saturated and resistant to standard daytime outbound calls.
+## Dashboard
+![Client Profile and Conversion](images/page1.png)
+![Risk and Priority Queue](images/page2.png)
+![Dial Cap and Lift Simulator](images/page3.png)
 
----
+## How to run
+1. Download the CSV from the UCI link.
+2. Create a PostgreSQL database.
+3. Copy `.env.example` to `.env` and fill in your database details.
+4. `pip install -r requirements.txt`
+5. `python 01_prep_and_load.py bank-additional-full.csv`
+6. Run `02_star_schema_and_analysis.sql`, then `03_campaign_targeting_queries.sql`.
+7. Use `04_Power_BI_DAX_Measures.txt` with the Power BI file.
 
-## 🏗️ Data Architecture & Engineering
-
-### Phase 1: Data Preparation & Cleaning
-The raw `bank-additional-full.csv` dataset contained unstructured text entries and legacy tracking metrics.
-* **Null Handling:** Executed auditing scripts to identify and standardize `'unknown'` string values across the `job`, `marital`, and `education` columns.
-* **Data Type Enforcement:** Cast raw string identifiers into logical numeric values and structured text to ensure accurate aggregate mathematics.
-
-### Phase 2: Relational Modeling (ETL)
-To simulate an enterprise data warehouse environment, the flat analytical table was queried using dimensional modeling logic:
-* Engineered Common Table Expressions (CTEs) to build temporary dimension tables (e.g., `dim_job_sector`).
-* Executed `LEFT JOIN` operations to append these dimensional hierarchies back to the primary fact table, enabling segmented business reporting without altering the raw underlying data structure.
-
----
-
-## 📈 Executive Dashboard Preview 
-![Executive Dashboard](executive_dashboard.png)
-
----
-*If you are a recruiter or hiring manager, please feel free to review the attached `.sql` files in this repository to examine the query structures, window functions, and aggregation logic used to generate these insights.*
+## Limitations
+- The "desk" regions (Corporate, Senior Liquidity, Retail) are assigned from job titles. They are not in the original data. The agent emails in the security table are demo values.
+- The pre-call score is a smoothed segment conversion rate, not a prediction model. Call duration is left out of it because it is only known after the call.
+- Python smooths with a weight of 20 over four columns. The SQL queries and DAX use 50 over different columns, so the two scores differ.
+- The dial cap results are counted on past data. They show what would have been kept or lost, not a guaranteed outcome.
